@@ -48,6 +48,10 @@ const COMMON_LOWER = new Set([
 export function extractIdentity(conv: NormalizedConversation): ProjectIdentity {
   const properNounCounts = new Map<string, { count: number; messages: Set<string> }>();
   const lowerCounts = new Map<string, { count: number; messages: Set<string> }>();
+  const bigramCounts = new Map<
+    string,
+    { count: number; messages: Set<string>; display: string }
+  >();
 
   for (const msg of conv.messages) {
     const textParts: string[] = [];
@@ -65,6 +69,7 @@ export function extractIdentity(conv: NormalizedConversation): ProjectIdentity {
     const text = textParts.join(' ');
     if (!text.trim()) continue;
     countTermsInText(text, msg.id, properNounCounts, lowerCounts);
+    countBigramsInText(text, msg.id, bigramCounts);
   }
 
   const totalMsgs = Math.max(1, conv.messages.length);
@@ -96,19 +101,34 @@ export function extractIdentity(conv: NormalizedConversation): ProjectIdentity {
     });
   }
 
-  const allTerms = [...properNouns, ...domainTerms].sort((a, b) => b.weight - a.weight);
-  const topTerms = allTerms.slice(0, 10);
+  const bigrams: IdentityTerm[] = [];
+  for (const stats of bigramCounts.values()) {
+    if (stats.count < 3) continue;
+    if (stats.messages.size < 2) continue;
+    const spread = stats.messages.size / totalMsgs;
+    const firstChar = stats.display[0];
+    bigrams.push({
+      term: stats.display,
+      count: stats.count,
+      spread,
+      weight: stats.count * (0.5 + 0.7 * spread),
+      isProperNoun: firstChar >= 'A' && firstChar <= 'Z',
+    });
+  }
+
+  const allTerms = [...properNouns, ...domainTerms, ...bigrams].sort(
+    (a, b) => b.weight - a.weight
+  );
+  const topTerms = allTerms.slice(0, 12);
 
   const projectName = pickProjectName(properNouns, conv.title);
   let confidence = computeConfidence(projectName, topTerms, properNounCounts);
   const project = synthesizeProjectLine(conv, projectName, topTerms);
 
-  if (project.sourceQuality === 'definition') {
-    confidence = 'high';
-  } else if (project.sourceQuality === 'none') {
+  if (project.sourceQuality === 'none') {
     confidence = 'low';
   }
-  // referential and templated keep the baseline confidence from computeConfidence
+  // templated keeps the baseline confidence from computeConfidence
 
   const recent = synthesizeRecentFocus(conv, projectName, topTerms);
 
@@ -241,21 +261,12 @@ function computeConfidence(
 }
 
 function synthesizeProjectLine(
-  conv: NormalizedConversation,
+  _conv: NormalizedConversation,
   projectName: string | null,
   topTerms: IdentityTerm[]
 ): { line: string; sourceQuality: 'definition' | 'referential' | 'templated' | 'none' } {
   if (projectName) {
-    const defSentence = findDefinitionSentence(conv, projectName);
-    if (defSentence) return { line: defSentence, sourceQuality: 'definition' };
-
-    const refSentence = findReferentialSentence(conv, projectName, topTerms);
-    if (refSentence) return { line: refSentence, sourceQuality: 'referential' };
-
-    const otherTerms = topTerms
-      .filter((t) => t.term.toLowerCase() !== projectName.toLowerCase())
-      .slice(0, 3)
-      .map((t) => t.term);
+    const otherTerms = pickProjectTerms(topTerms, projectName, 6);
     if (otherTerms.length > 0) {
       return {
         line: `${projectName} - project around ${otherTerms.join(', ')}.`,
@@ -265,10 +276,81 @@ function synthesizeProjectLine(
   }
 
   if (topTerms.length > 0) {
-    const terms = topTerms.slice(0, 3).map((t) => t.term).join(', ');
-    return { line: `Project topic: ${terms}.`, sourceQuality: 'templated' };
+    const terms = pickProjectTerms(topTerms, null, 6);
+    if (terms.length > 0) {
+      return {
+        line: `Project keywords: ${terms.join(', ')}.`,
+        sourceQuality: 'templated',
+      };
+    }
   }
   return { line: '', sourceQuality: 'none' };
+}
+
+function pickProjectTerms(
+  topTerms: IdentityTerm[],
+  excludeName: string | null,
+  max: number
+): string[] {
+  const result: string[] = [];
+  const usedLower = new Set<string>();
+  const excludeLower = excludeName?.toLowerCase() ?? '';
+
+  for (const t of topTerms) {
+    if (result.length >= max) break;
+    const termLower = t.term.toLowerCase();
+    if (termLower === excludeLower) continue;
+    if (usedLower.has(termLower)) continue;
+
+    if (termLower.includes(' ')) {
+      const tokens = termLower.split(/\s+/);
+      if (tokens.some((tok) => usedLower.has(tok))) continue;
+      usedLower.add(termLower);
+      for (const tok of tokens) usedLower.add(tok);
+      result.push(t.term);
+    } else {
+      usedLower.add(termLower);
+      result.push(t.term);
+    }
+  }
+  return result;
+}
+
+function countBigramsInText(
+  text: string,
+  messageId: string,
+  bigramCounts: Map<string, { count: number; messages: Set<string>; display: string }>
+): void {
+  const wordRe = /[A-Za-z][A-Za-z0-9_-]*/g;
+  const matches: Array<{ word: string; start: number; end: number }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = wordRe.exec(text)) !== null) {
+    matches.push({ word: m[0], start: m.index, end: m.index + m[0].length });
+  }
+  for (let i = 0; i < matches.length - 1; i++) {
+    const a = matches[i].word;
+    const b = matches[i + 1].word;
+    const gap = text.slice(matches[i].end, matches[i + 1].start);
+    if (/[.!?\n]/.test(gap)) continue;
+    if (a.length < 3 || b.length < 3) continue;
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    if (COMMON_LOWER.has(aLower) || COMMON_LOWER.has(bLower)) continue;
+    if (CAPITAL_STOPLIST.has(a) || CAPITAL_STOPLIST.has(b)) continue;
+    const aCap = a[0] >= 'A' && a[0] <= 'Z';
+    const bCap = b[0] >= 'A' && b[0] <= 'Z';
+    const bothLowerAlpha = !aCap && !bCap && /^[a-z]+$/.test(a) && /^[a-z]+$/.test(b);
+    if (!aCap && !bCap && !bothLowerAlpha) continue;
+    const key = `${aLower} ${bLower}`;
+    const display = `${a} ${b}`;
+    const existing = bigramCounts.get(key);
+    if (existing) {
+      existing.count++;
+      existing.messages.add(messageId);
+    } else {
+      bigramCounts.set(key, { count: 1, messages: new Set([messageId]), display });
+    }
+  }
 }
 
 const SECTION_HEADER_PATTERNS: RegExp[] = [
@@ -402,6 +484,7 @@ function countTermsAcross(messages: NormalizedConversation['messages']): Identit
   return out;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function findDefinitionSentence(conv: NormalizedConversation, projectName: string): string | null {
   const re = new RegExp(
     `\\b${escapeRegex(projectName)}\\s+(is|are|will be|will become|stands for|means)\\b[^.!?]{10,180}[.!?]`,
@@ -418,6 +501,7 @@ function findDefinitionSentence(conv: NormalizedConversation, projectName: strin
   return null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function findReferentialSentence(
   conv: NormalizedConversation,
   projectName: string,

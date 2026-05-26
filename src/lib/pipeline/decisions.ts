@@ -42,7 +42,7 @@ export function extractDecisions(
       const sentences = splitIntoSentences(cleaned);
       for (const raw of sentences) {
         const s = raw.trim();
-        if (!isValidDecisionShape(s)) continue;
+        if (!isValidDecisionShape(s, identityLower)) continue;
         const strength = scoreDecision(s, msg.role);
         if (strength === 0) continue;
         const bonus = identityLower.some((t) => s.toLowerCase().includes(t)) ? 0.3 : 0;
@@ -64,17 +64,39 @@ function splitIntoSentences(text: string): string[] {
   return text.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
 }
 
-function isValidDecisionShape(s: string): boolean {
+function isValidDecisionShape(s: string, identityTermsLower: string[] = []): boolean {
   if (s.length < 25 || s.length > 300) return false;
   if (s[0] === '#') return false;
   if (/\?$/.test(s)) return false;
+  if (/:\s*$/.test(s)) return false;
+  if (/\b(?:can|should|do)\s+we\b|\bwhat\s+about\b|\bhow\s+(?:do|about)\s+we\b|\bwhy\s+don'?t\s+we\b/i.test(s)) {
+    return false;
+  }
+  if (/^(?:check|paste|run|see|read|look\s+at|try|click)\b/i.test(s)) return false;
+  if (/^(?:let\s+me|i'?ll\s+explain|here'?s\s+how|here\s+is\s+how|now\s+i'?ll)\b/i.test(s)) return false;
   if (looksLikeSectionHeader(s)) return false;
   if (!/[a-zA-Z]/.test(s)) return false;
   const wordCount = s.split(/\s+/).filter(Boolean).length;
-  if (wordCount < 6) return false;
+  if (wordCount < 8 && !hasSpecificNoun(s, identityTermsLower)) return false;
   if (looksLikeDescriptiveFragment(s)) return false;
   if (looksLikeFutureHypothetical(s)) return false;
   return true;
+}
+
+function hasSpecificNoun(s: string, identityTermsLower: string[]): boolean {
+  const lower = s.toLowerCase();
+  if (identityTermsLower.some((t) => t && lower.includes(t))) return true;
+  const withoutLead = s.replace(/^[\s"'(\[]+/, '');
+  const tokens = withoutLead.match(/[A-Za-z][A-Za-z0-9_-]*/g) ?? [];
+  for (let i = 0; i < tokens.length; i++) {
+    const w = tokens[i];
+    if (i === 0) continue;
+    if (w.length < 3) continue;
+    if (w[0] < 'A' || w[0] > 'Z') continue;
+    if (/^(The|This|That|These|Those|We|You|Our|Their|My|Your|It|He|She|They|I)$/.test(w)) continue;
+    return true;
+  }
+  return false;
 }
 
 function looksLikeDescriptiveFragment(s: string): boolean {
