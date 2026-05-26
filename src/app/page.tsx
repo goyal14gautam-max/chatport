@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { ConversationPicker } from '@/components/ConversationPicker';
 import { InputModeTabs, type InputMode } from '@/components/InputModeTabs';
+import { Landing } from '@/components/Landing';
 import { LinkInput } from '@/components/LinkInput';
 import { MetaBar } from '@/components/MetaBar';
 import { PreviewPane } from '@/components/PreviewPane';
@@ -117,84 +118,126 @@ export default function Home() {
   const showInputUI = state.kind === 'idle';
   const showBackLink = state.kind !== 'idle' && state.kind !== 'reading' && state.kind !== 'fetching';
 
+  const scrollToTool = () => {
+    const el = document.getElementById('tool');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
     <main className="min-h-screen bg-white">
+      <nav className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-gray-100">
+        <div className="max-w-3xl mx-auto px-4 h-12 flex items-center justify-between">
+          <a href="/" className="text-sm font-semibold text-gray-900">ChatPort</a>
+          <div className="flex items-center gap-4 text-sm">
+            <a href="/examples" className="text-gray-600 hover:text-gray-900">Examples</a>
+            <a
+              href="https://github.com/goyal14gautam-max/chatport"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gray-600 hover:text-gray-900"
+            >
+              GitHub
+            </a>
+          </div>
+        </div>
+      </nav>
+
       <div className="max-w-3xl mx-auto px-4 py-10 sm:py-16">
-        <header className="mb-8">
-          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900">ChatPort</h1>
-          <p className="mt-1 text-sm text-gray-600">
-            Compress AI conversations into portable handoff markdown. No LLMs, no servers — runs entirely in your browser.
-          </p>
-        </header>
+        {showInputUI && <Landing onGetStarted={scrollToTool} />}
 
-        {showBackLink && (
-          <button
-            type="button"
-            onClick={handleReset}
-            className="mb-4 text-sm text-gray-600 hover:text-gray-900"
+        <section id="tool" className={showInputUI ? 'mt-20 sm:mt-24 scroll-mt-16' : 'scroll-mt-16'}>
+          {showInputUI && (
+            <h2 className="text-2xl font-semibold text-gray-900 mb-6">Try it</h2>
+          )}
+
+          {showBackLink && (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="mb-4 text-sm text-gray-600 hover:text-gray-900"
+            >
+              ← Start over
+            </button>
+          )}
+
+          {showInputUI && (
+            <div className="space-y-4">
+              <InputModeTabs active={mode} onChange={setMode} />
+              {mode === 'link' ? <LinkInput onSubmit={handleLink} /> : <Uploader onFile={handleFile} />}
+              <p className="text-sm text-gray-500">
+                Not ready to upload your own?{' '}
+                <a href="/examples" className="text-gray-900 underline underline-offset-2 hover:no-underline">
+                  See an example output →
+                </a>
+              </p>
+            </div>
+          )}
+
+          {state.kind === 'reading' && (
+            <StatusBanner kind="parsing" message="Reading and parsing your file…" />
+          )}
+
+          {state.kind === 'fetching' && (
+            <StatusBanner kind="parsing" message="Fetching the conversation from ChatGPT…" />
+          )}
+
+          {state.kind === 'picking' && (
+            <ConversationPicker summaries={state.summaries} onPick={handlePick} />
+          )}
+
+          {state.kind === 'processing' && (
+            <StatusBanner
+              kind="processing"
+              message="Compressing the conversation (this may take a moment for large chats)…"
+            />
+          )}
+
+          {state.kind === 'ready' && (
+            <div className="space-y-3">
+              <MetaBar meta={state[state.activeTab].meta} />
+              <PreviewTabs
+                active={state.activeTab}
+                onChange={handleTabChange}
+                resumeChars={state.resume.meta.outputChars}
+                fullChars={state.full.meta.outputChars}
+              />
+              <PreviewPane markdown={state[state.activeTab].markdown} />
+              <Toolbar
+                markdown={state[state.activeTab].markdown}
+                filename={`${slugify(state.conversationTitle)}-${state.activeTab}.md`}
+                onReset={handleReset}
+              />
+            </div>
+          )}
+
+          {state.kind === 'error' && (
+            <StatusBanner
+              kind="error"
+              message={state.message}
+              action={
+                state.suggestUpload
+                  ? { label: 'Switch to JSON upload', onClick: switchToUpload }
+                  : undefined
+              }
+            />
+          )}
+        </section>
+
+        <footer className="mt-16 pt-6 border-t border-gray-200 text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-1">
+          <span>Open source</span>
+          <span aria-hidden>·</span>
+          <a
+            href="https://github.com/goyal14gautam-max/chatport"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-gray-900"
           >
-            ← Start over
-          </button>
-        )}
-
-        {showInputUI && (
-          <div className="space-y-4">
-            <InputModeTabs active={mode} onChange={setMode} />
-            {mode === 'link' ? <LinkInput onSubmit={handleLink} /> : <Uploader onFile={handleFile} />}
-          </div>
-        )}
-
-        {state.kind === 'reading' && (
-          <StatusBanner kind="parsing" message="Reading and parsing your file…" />
-        )}
-
-        {state.kind === 'fetching' && (
-          <StatusBanner kind="parsing" message="Fetching the conversation from ChatGPT…" />
-        )}
-
-        {state.kind === 'picking' && (
-          <ConversationPicker summaries={state.summaries} onPick={handlePick} />
-        )}
-
-        {state.kind === 'processing' && (
-          <StatusBanner
-            kind="processing"
-            message="Compressing the conversation (this may take a moment for large chats)…"
-          />
-        )}
-
-        {state.kind === 'ready' && (
-          <div className="space-y-3">
-            <MetaBar meta={state[state.activeTab].meta} />
-            <PreviewTabs
-              active={state.activeTab}
-              onChange={handleTabChange}
-              resumeChars={state.resume.meta.outputChars}
-              fullChars={state.full.meta.outputChars}
-            />
-            <PreviewPane markdown={state[state.activeTab].markdown} />
-            <Toolbar
-              markdown={state[state.activeTab].markdown}
-              filename={`${slugify(state.conversationTitle)}-${state.activeTab}.md`}
-              onReset={handleReset}
-            />
-          </div>
-        )}
-
-        {state.kind === 'error' && (
-          <StatusBanner
-            kind="error"
-            message={state.message}
-            action={
-              state.suggestUpload
-                ? { label: 'Switch to JSON upload', onClick: switchToUpload }
-                : undefined
-            }
-          />
-        )}
-
-        <footer className="mt-12 pt-6 border-t border-gray-200 text-xs text-gray-500">
-          Your conversation never leaves this browser, except when fetching ChatGPT share links — those are routed through our server to bypass CORS. Nothing is stored.
+            GitHub
+          </a>
+          <span aria-hidden>·</span>
+          <span>MIT licensed</span>
+          <span aria-hidden>·</span>
+          <span>No data leaves this browser</span>
         </footer>
       </div>
     </main>

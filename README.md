@@ -1,5 +1,7 @@
 # ChatPort
 
+**[Live demo →](https://chatport.vercel.app)** · [Examples →](https://chatport.vercel.app/examples)
+
 Compress ChatGPT and Claude conversations into compact, portable markdown handoff documents. Paste them into any other AI tool to continue your work with full context — without re-explaining everything.
 
 Built entirely with classical NLP (TF-IDF, TextRank, regex). **No LLM API calls.** No accounts. No data stored.
@@ -17,12 +19,43 @@ Two input paths, one pipeline:
 
 The compression pipeline:
 
-1. **Normalize** — both ChatGPT and Claude exports are parsed into one common schema (messages, content blocks, attachments).
-2. **Classify** — heuristic detection of conversation type: coding, writing, research, planning, or mixed.
+```
+ChatGPT/Claude JSON
+       │
+       ▼
+  ┌──────────┐
+  │  Parse   │  → unified message schema
+  └────┬─────┘
+       ▼
+  ┌──────────┐
+  │ Classify │  → coding | writing | research | planning | mixed
+  └────┬─────┘
+       ▼
+  ┌──────────┐
+  │ Extract  │  → sentences · code blocks · artifacts
+  └────┬─────┘
+       ▼
+  ┌──────────┐
+  │  Score   │  → TF-IDF + position + role + type overlay
+  └────┬─────┘
+       ▼
+  ┌──────────┐
+  │  Select  │  → greedy fill, ~9k char budget, 25% always-keep
+  └────┬─────┘
+       ▼
+  ┌──────────┐
+  │  Render  │  → type-specific markdown template
+  └────┬─────┘
+       ▼
+  Portable .md
+```
+
+1. **Parse** — both ChatGPT and Claude exports are normalized into one common schema (messages, content blocks, attachments).
+2. **Classify** — heuristic detection of conversation type using regex-driven signals (code ratio, error words, citations, decision markers, etc.).
 3. **Extract candidates** — every sentence, code block, and artifact becomes a scoring candidate.
 4. **Score** — TF-IDF for informational density, plus position recency, role weights, question/decision markers, and a type-specific overlay.
-5. **Select** — always-keep rules (last user message, artifacts, system prompt) plus a greedy knapsack to fit the budget.
-6. **Render** — type-aware markdown template with sections like Goal, Key decisions, Latest state, Open questions, Next steps.
+5. **Select** — always-keep rules (last user message, artifacts, strong decisions) plus a greedy knapsack to fit the budget, with a diversity penalty so one long message can't monopolize the output.
+6. **Render** — type-aware markdown template with sections like Project identity, Current state, Key decisions, Open questions, Next steps.
 
 Output is offered at two compression levels in the UI:
 
@@ -47,11 +80,12 @@ Output is offered at two compression levels in the UI:
 ## Local development
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/goyal14gautam-max/chatport.git
 cd chatport
 npm install
 npm run dev          # http://localhost:3000
-npm test             # vitest, 66 tests
+npm test             # vitest, 78 tests
+npm run lint         # eslint via next lint
 npm run build        # production build
 npm run cli -- tests/fixtures/chatgpt-coding.json resume   # eyeball CLI
 ```
@@ -91,6 +125,12 @@ tests/                        # vitest unit tests + fixtures
 - Better sentence-splitter for markdown-heavy assistant messages
 - Optional opt-in LLM polish pass (bring-your-own-key) for abstractive summarization
 
+## Contributing
+
+PRs welcome. Please open an issue first for anything beyond a small fix — happy to talk through approach before you sink time into a change.
+
+For local development setup, see the [Local development](#local-development) section above.
+
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).

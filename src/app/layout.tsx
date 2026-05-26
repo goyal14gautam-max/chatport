@@ -13,10 +13,39 @@ const geistMono = localFont({
   weight: "100 900",
 });
 
+const SITE_URL =
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://chatport.vercel.app";
+const TITLE =
+  "ChatPort — Portable handoff docs for ChatGPT and Claude conversations";
+const DESCRIPTION =
+  "Compress long AI conversations into structured markdown you can paste into any other AI tool. No LLMs, no accounts, runs in your browser.";
+
 export const metadata: Metadata = {
-  title: "ChatPort — Compress AI conversations into portable handoff markdown",
-  description:
-    "Upload a ChatGPT or Claude export, get a compact .md you can paste into any AI tool to continue the conversation. No LLMs, no servers, runs entirely in your browser.",
+  metadataBase: new URL(SITE_URL),
+  title: TITLE,
+  description: DESCRIPTION,
+  keywords: [
+    "ChatGPT",
+    "Claude",
+    "AI conversation",
+    "handoff",
+    "summarization",
+    "markdown",
+    "TF-IDF",
+    "extractive summarization",
+  ],
+  openGraph: {
+    title: TITLE,
+    description: DESCRIPTION,
+    url: SITE_URL,
+    siteName: "ChatPort",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+  },
 };
 
 export default function RootLayout({
