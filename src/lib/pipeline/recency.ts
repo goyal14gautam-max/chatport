@@ -7,7 +7,7 @@ export interface MessageSnippet {
   hadCode: boolean;
 }
 
-const NEXT_STEP_RE = /\b(now (let'?s|we'?ll|i'?ll|i need|we need)|next (we|i|step|up)|still (need|have to|to-do|todo)|todo:|to-do|let'?s (build|add|write|create|fix|test|deploy|ship|do|implement|refactor|move|switch)|i'?ll (build|add|write|create|fix|test|deploy|ship|do|implement)|we'?ll (build|add|write|create|fix|test|deploy|ship)|we need to (build|add|write|fix|test|deploy|ship|implement|create|switch|move)|need to (build|add|write|fix|test|deploy|ship|implement|refactor)|want to (build|add|write|fix|test|implement))\b/i;
+const NEXT_STEP_RE = /\b(now (let'?s|we'?ll|i'?ll|i need|we need)|next (we|i|step|up)|still (need|have to|to-do|todo)|todo:|to-do|let'?s (build|add|write|create|fix|test|deploy|ship|do|implement|refactor|move|switch|remove|reframe|rewrite)|i'?ll (build|add|write|create|fix|test|deploy|ship|do|implement)|we'?ll (build|add|write|create|fix|test|deploy|ship)|we need to (build|add|write|fix|test|deploy|ship|implement|create|switch|move)|need to (build|add|write|fix|test|deploy|ship|implement|refactor)|want to (build|add|write|fix|test|implement)|remove the (first|second|last|.{1,30}) (change|brief|section|step|item)|reframe the brief)\b/i;
 
 const USER_FIRST_SENTS = 2;
 const USER_TAIL_SENTS = 1;
@@ -146,6 +146,146 @@ export function extractNextSteps(conv: NormalizedConversation, scanLastUserMsgs 
     if (deduped.length >= cap) break;
   }
   return deduped.sort((a, b) => a.position - b.position);
+}
+
+export interface PlanItem {
+  label?: string;
+  text: string;
+  messageId: string;
+  messageIndex: number;
+}
+
+const PART_HEADER_RE = /\b(PART|Part|Phase|Step)\s+(\d+)\s*[-:]\s*([^\n]{3,140})/g;
+const ANCHORED_HEADER_RE = /^(Next steps?|What to (?:build|do)|Remaining work|Action items?|TODO|To do|To-do|Tasks|Things to (?:build|do)|Confirm done by)\b[:\s]*$/im;
+const N_THINGS_INTRO_RE = /\b(two|three|four|five|six|several|the following)\s+(things|items|steps|changes|tasks|fixes|parts|additions)\s+(?:to\s+)?(?:do|build|fix|add|change|implement|ship|complete|handle)?\b[:\s]/i;
+const NUMBERED_ITEM_RE = /^\s*(\d+)\.\s+(\S.+)$/;
+
+export function extractStructuredPlan(conv: NormalizedConversation, pairsTarget = 15): PlanItem[] {
+  const recentMessages = conv.messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .slice(-pairsTarget * 2);
+  if (recentMessages.length === 0) return [];
+
+  for (let i = recentMessages.length - 1; i >= 0; i--) {
+    const msg = recentMessages[i];
+    const mIdx = conv.messages.indexOf(msg);
+    const combined = msg.content
+      .filter((b) => b.type === 'text')
+      .map((b) => stripMarkdown(stripUrls((b as { text: string }).text)))
+      .join('\n\n');
+    if (!combined) continue;
+    const items = detectPlanInBlock(combined, msg.id, mIdx);
+    if (items.length >= 2) return items.slice(0, 6);
+  }
+  return [];
+}
+
+function detectPlanInBlock(text: string, messageId: string, messageIndex: number): PlanItem[] {
+  const partMatches = collectPartMatches(text, messageId, messageIndex);
+  if (partMatches.length >= 2) return partMatches;
+
+  const anchoredItems = collectAnchoredListItems(text, messageId, messageIndex);
+  if (anchoredItems.length >= 2) return anchoredItems;
+
+  const nThingsItems = collectNThingsList(text, messageId, messageIndex);
+  if (nThingsItems.length >= 2) return nThingsItems;
+
+  const numberedItems = collectNumberedItems(text, messageId, messageIndex);
+  if (numberedItems.length >= 3) return numberedItems;
+
+  return [];
+}
+
+function collectPartMatches(text: string, messageId: string, messageIndex: number): PlanItem[] {
+  const out: PlanItem[] = [];
+  const fresh = new RegExp(PART_HEADER_RE.source, PART_HEADER_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = fresh.exec(text)) !== null) {
+    const label = `${match[1].toUpperCase() === 'PART' ? 'PART' : capitalizeWord(match[1])} ${match[2]}`;
+    const itemText = truncateItem(match[3]);
+    if (!itemText) continue;
+    out.push({ label, text: itemText, messageId, messageIndex });
+  }
+  return out;
+}
+
+function collectAnchoredListItems(text: string, messageId: string, messageIndex: number): PlanItem[] {
+  const lines = text.split('\n');
+  let headerIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (ANCHORED_HEADER_RE.test(lines[i].trim())) {
+      headerIdx = i;
+      break;
+    }
+  }
+  if (headerIdx < 0) return [];
+  return collectListItemsAfter(lines, headerIdx, messageId, messageIndex);
+}
+
+function collectNThingsList(text: string, messageId: string, messageIndex: number): PlanItem[] {
+  const lines = text.split('\n');
+  let introIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (N_THINGS_INTRO_RE.test(lines[i])) {
+      introIdx = i;
+      break;
+    }
+  }
+  if (introIdx < 0) return [];
+  return collectListItemsAfter(lines, introIdx, messageId, messageIndex);
+}
+
+function collectListItemsAfter(
+  lines: string[],
+  startIdx: number,
+  messageId: string,
+  messageIndex: number
+): PlanItem[] {
+  const out: PlanItem[] = [];
+  let blanksInARow = 0;
+  for (let i = startIdx + 1; i < lines.length && i < startIdx + 30; i++) {
+    const raw = lines[i];
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      blanksInARow++;
+      if (blanksInARow >= 2 && out.length > 0) break;
+      continue;
+    }
+    blanksInARow = 0;
+    const numbered = trimmed.match(NUMBERED_ITEM_RE);
+    if (numbered) {
+      const itemText = truncateItem(numbered[2]);
+      if (itemText) out.push({ text: itemText, messageId, messageIndex });
+      continue;
+    }
+    if (out.length > 0) break;
+  }
+  return out;
+}
+
+function collectNumberedItems(text: string, messageId: string, messageIndex: number): PlanItem[] {
+  const lines = text.split('\n');
+  const out: PlanItem[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(NUMBERED_ITEM_RE);
+    if (!match) continue;
+    const itemText = truncateItem(match[2]);
+    if (itemText) out.push({ text: itemText, messageId, messageIndex });
+  }
+  if (out.length < 3) return [];
+  return out;
+}
+
+function truncateItem(s: string): string {
+  const cleaned = s.replace(/\s+/g, ' ').trim().replace(/[*_`]+$/, '').trim();
+  if (cleaned.length < 4) return '';
+  if (cleaned.length <= 140) return cleaned;
+  return cleaned.slice(0, 137).replace(/\s\S*$/, '') + '...';
+}
+
+function capitalizeWord(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
 export interface OpenQuestion {

@@ -1,5 +1,5 @@
 import type { NormalizedConversation } from '../types';
-import { stripMarkdown, stripUrls } from '../utils/text';
+import { asciiize, stripMarkdown, stripUrls } from '../utils/text';
 
 export interface IdentityTerm {
   term: string;
@@ -12,8 +12,10 @@ export interface IdentityTerm {
 export interface ProjectIdentity {
   projectName: string | null;
   terms: IdentityTerm[];
-  aboutLine: string;
+  projectLine: string;
+  recentFocusLine: string;
   confidence: 'high' | 'medium' | 'low';
+  recentMessageBlockCount: number;
 }
 
 const CAPITAL_STOPLIST = new Set([
@@ -97,19 +99,27 @@ export function extractIdentity(conv: NormalizedConversation): ProjectIdentity {
   const allTerms = [...properNouns, ...domainTerms].sort((a, b) => b.weight - a.weight);
   const topTerms = allTerms.slice(0, 10);
 
-  const projectName = pickProjectName(properNouns);
+  const projectName = pickProjectName(properNouns, conv.title);
   let confidence = computeConfidence(projectName, topTerms, properNounCounts);
-  const about = synthesizeAbout(conv, projectName, topTerms);
+  const project = synthesizeProjectLine(conv, projectName, topTerms);
 
-  if (about.sourceQuality === 'readme' || about.sourceQuality === 'definition') {
+  if (project.sourceQuality === 'definition') {
     confidence = 'high';
-  } else if (about.sourceQuality === 'referential' || about.sourceQuality === 'templated') {
-    confidence = confidence === 'high' ? 'medium' : 'low';
-  } else {
+  } else if (project.sourceQuality === 'none') {
     confidence = 'low';
   }
+  // referential and templated keep the baseline confidence from computeConfidence
 
-  return { projectName, terms: topTerms, aboutLine: about.line, confidence };
+  const recent = synthesizeRecentFocus(conv, projectName, topTerms);
+
+  return {
+    projectName,
+    terms: topTerms,
+    projectLine: project.line,
+    recentFocusLine: recent.line,
+    confidence,
+    recentMessageBlockCount: recent.blockCount,
+  };
 }
 
 function countTermsInText(
@@ -188,13 +198,33 @@ function bumpCount(
   }
 }
 
-function pickProjectName(properNouns: IdentityTerm[]): string | null {
+function pickProjectName(properNouns: IdentityTerm[], conversationTitle?: string): string | null {
+  const titleTerms = extractTitleProperNouns(conversationTitle);
+  for (const titleTerm of titleTerms) {
+    const found = properNouns.find((p) => p.term.toLowerCase() === titleTerm.toLowerCase());
+    if (found) return found.term;
+  }
   const sorted = [...properNouns].sort((a, b) => b.weight - a.weight);
   for (const t of sorted) {
     if (t.spread < 0.02) continue;
     return t.term;
   }
   return null;
+}
+
+function extractTitleProperNouns(title: string | undefined): string[] {
+  if (!title) return [];
+  const out: string[] = [];
+  const wordRe = /[A-Z][A-Za-z0-9_-]*/g;
+  let match: RegExpExecArray | null;
+  while ((match = wordRe.exec(title)) !== null) {
+    const word = match[0];
+    if (word.length < 3) continue;
+    if (CAPITAL_STOPLIST.has(word)) continue;
+    if (/^(Project|Chat|Conversation|Build|Plan|Notes|Discussion|Draft)$/i.test(word)) continue;
+    out.push(word);
+  }
+  return out;
 }
 
 function computeConfidence(
@@ -210,14 +240,11 @@ function computeConfidence(
   return 'low';
 }
 
-function synthesizeAbout(
+function synthesizeProjectLine(
   conv: NormalizedConversation,
   projectName: string | null,
   topTerms: IdentityTerm[]
-): { line: string; sourceQuality: 'readme' | 'definition' | 'referential' | 'templated' | 'none' } {
-  const readmeAbout = aboutFromInlineReadme(conv);
-  if (readmeAbout) return { line: readmeAbout, sourceQuality: 'readme' };
-
+): { line: string; sourceQuality: 'definition' | 'referential' | 'templated' | 'none' } {
   if (projectName) {
     const defSentence = findDefinitionSentence(conv, projectName);
     if (defSentence) return { line: defSentence, sourceQuality: 'definition' };
@@ -226,12 +253,12 @@ function synthesizeAbout(
     if (refSentence) return { line: refSentence, sourceQuality: 'referential' };
 
     const otherTerms = topTerms
-      .filter((t) => t.term !== projectName)
+      .filter((t) => t.term.toLowerCase() !== projectName.toLowerCase())
       .slice(0, 3)
       .map((t) => t.term);
     if (otherTerms.length > 0) {
       return {
-        line: `${projectName} - project involving ${otherTerms.join(', ')}.`,
+        line: `${projectName} - project around ${otherTerms.join(', ')}.`,
         sourceQuality: 'templated',
       };
     }
@@ -244,49 +271,135 @@ function synthesizeAbout(
   return { line: '', sourceQuality: 'none' };
 }
 
-function aboutFromInlineReadme(conv: NormalizedConversation): string | null {
-  for (const m of conv.messages) {
-    for (const a of m.attachments) {
-      const fn = (a.filename ?? '').toLowerCase();
-      if (!fn.includes('readme')) continue;
-      if (!a.inlineContent) continue;
-      const para = firstNarrativeParagraph(a.inlineContent);
-      if (para) return para;
-    }
-    for (const b of m.content) {
-      if (b.type !== 'artifact') continue;
-      const title = (b.title ?? '').toLowerCase();
-      if (!title.includes('readme')) continue;
-      const para = firstNarrativeParagraph(b.text);
-      if (para) return para;
-    }
+const SECTION_HEADER_PATTERNS: RegExp[] = [
+  /\bPART\s+\d+\s+[-:]\s+([^\n.]{3,60})/gi,
+  /\bPhase\s+\d+\s+[-:]\s+([^\n.]{3,60})/gi,
+  /\bStep\s+\d+\s+[-:]\s+([^\n.]{3,60})/gi,
+  /\bIssue\s+\d+\s+[-:]\s+([^\n.?]{3,60})/gi,
+  /\bQuestion\s+\d+\s+[-:]\s+([^\n.?]{3,60})/gi,
+];
+
+function synthesizeRecentFocus(
+  conv: NormalizedConversation,
+  projectName: string | null,
+  conversationTopTerms: IdentityTerm[]
+): { line: string; blockCount: number } {
+  const recent = lastMessagePairs(conv, 15);
+  let blockCount = 0;
+  for (const m of recent) blockCount += m.content.length;
+  if (recent.length === 0) return { line: '', blockCount };
+
+  const sectionPhrases = extractSectionHeaderPhrases(recent);
+
+  const recentTerms = countTermsAcross(recent);
+  const conversationTopSet = new Set(
+    conversationTopTerms.slice(0, 5).map((t) => t.term.toLowerCase())
+  );
+  const projectLower = projectName?.toLowerCase() ?? '';
+
+  const emergent: Array<{ term: string; weight: number }> = [];
+  for (const t of recentTerms) {
+    if (t.term.toLowerCase() === projectLower) continue;
+    const isInTop5 = conversationTopSet.has(t.term.toLowerCase());
+    const emergentBonus = isInTop5 ? 0 : 0.5;
+    emergent.push({ term: t.term, weight: t.weight + emergentBonus });
   }
-  return null;
+  emergent.sort((a, b) => b.weight - a.weight);
+
+  const picked: string[] = [];
+  const seen = new Set<string>();
+
+  for (const phrase of sectionPhrases) {
+    const norm = phrase.toLowerCase().trim();
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    picked.push(phrase);
+    if (picked.length >= 4) break;
+  }
+  for (const e of emergent) {
+    if (picked.length >= 4) break;
+    const norm = e.term.toLowerCase();
+    if (seen.has(norm)) continue;
+    if ([...seen].some((existing) => existing.includes(norm) || norm.includes(existing))) continue;
+    seen.add(norm);
+    picked.push(e.term);
+  }
+
+  if (picked.length === 0) return { line: '', blockCount };
+  return { line: `${picked.join(', ')}.`, blockCount };
 }
 
-function firstNarrativeParagraph(content: string): string | null {
-  const lines = content.split('\n');
-  const paragraph: string[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      if (paragraph.length > 0) break;
-      continue;
+function lastMessagePairs(conv: NormalizedConversation, pairsTarget: number) {
+  const msgs = conv.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  return msgs.slice(-pairsTarget * 2);
+}
+
+function extractSectionHeaderPhrases(messages: NormalizedConversation['messages']): string[] {
+  const phrases: Array<{ phrase: string; index: number }> = [];
+  messages.forEach((m, mIdx) => {
+    if (m.role !== 'assistant') return;
+    const combined = m.content
+      .filter((b) => b.type === 'text')
+      .map((b) => asciiize((b as { text: string }).text))
+      .join('\n\n');
+    if (!combined) return;
+    for (const re of SECTION_HEADER_PATTERNS) {
+      const fresh = new RegExp(re.source, re.flags);
+      let match: RegExpExecArray | null;
+      while ((match = fresh.exec(combined)) !== null) {
+        const phrase = match[1].trim().replace(/[*_`]+/g, '').replace(/\s+/g, ' ');
+        if (phrase.length < 3 || phrase.length > 60) continue;
+        phrases.push({ phrase, index: mIdx });
+      }
     }
-    if (/^#{1,6}\s/.test(trimmed)) {
-      if (paragraph.length > 0) break;
-      continue;
+  });
+  phrases.sort((a, b) => b.index - a.index);
+  return phrases.map((p) => p.phrase);
+}
+
+function countTermsAcross(messages: NormalizedConversation['messages']): IdentityTerm[] {
+  const properNounCounts = new Map<string, { count: number; messages: Set<string> }>();
+  const lowerCounts = new Map<string, { count: number; messages: Set<string> }>();
+
+  for (const msg of messages) {
+    const textParts: string[] = [];
+    for (const block of msg.content) {
+      if (block.type === 'text') {
+        textParts.push(stripMarkdown(stripUrls(block.text)));
+      }
     }
-    if (/^```/.test(trimmed) || /^[-*+]\s/.test(trimmed)) {
-      if (paragraph.length > 0) break;
-      continue;
-    }
-    paragraph.push(trimmed);
-    if (paragraph.join(' ').length > 200) break;
+    const text = textParts.join(' ');
+    if (!text.trim()) continue;
+    countTermsInText(text, msg.id, properNounCounts, lowerCounts);
   }
-  if (paragraph.length === 0) return null;
-  const joined = paragraph.join(' ').slice(0, 240).trim();
-  return joined.length >= 20 ? joined : null;
+
+  const totalMsgs = Math.max(1, messages.length);
+  const out: IdentityTerm[] = [];
+  for (const [term, stats] of properNounCounts) {
+    if (stats.count < 2) continue;
+    const spread = stats.messages.size / totalMsgs;
+    out.push({
+      term,
+      count: stats.count,
+      spread,
+      weight: stats.count * (0.4 + 0.6 * spread),
+      isProperNoun: true,
+    });
+  }
+  for (const [term, stats] of lowerCounts) {
+    if (stats.count < 3) continue;
+    if (stats.messages.size < 2) continue;
+    const spread = stats.messages.size / totalMsgs;
+    out.push({
+      term,
+      count: stats.count,
+      spread,
+      weight: stats.count * (0.3 + 0.5 * spread),
+      isProperNoun: false,
+    });
+  }
+  out.sort((a, b) => b.weight - a.weight);
+  return out;
 }
 
 function findDefinitionSentence(conv: NormalizedConversation, projectName: string): string | null {
@@ -323,11 +436,13 @@ function findReferentialSentence(
       const stripped = stripMarkdown(stripUrls(b.text));
       const sentences = stripped.split(/(?<=[.!?])\s+/);
       for (const s of sentences) {
-        const lower = s.toLowerCase();
+        const trimmed = s.trim();
+        if (trimmed.endsWith('?')) continue;
+        const lower = trimmed.toLowerCase();
         if (!lower.includes(projectName.toLowerCase())) continue;
         const matchCount = otherTerms.filter((t) => lower.includes(t)).length;
-        if (matchCount >= 2 && s.length >= 30 && s.length <= 240) {
-          return s.trim();
+        if (matchCount >= 2 && trimmed.length >= 30 && trimmed.length <= 240) {
+          return trimmed;
         }
       }
     }

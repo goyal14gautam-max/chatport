@@ -29,9 +29,11 @@ for (const level of ['tldr', 'resume', 'full'] as const) {
 process.stdout.write(
   `\nHuman-review checklist (open out/prajna-resume-new.md):\n` +
   `  [ ] H1 names the project ("Prajna")\n` +
-  `  [ ] **About:** line describes the project, not a stray URL or first user message\n` +
+  `  [ ] **Project:** line names Prajna and surfaces real terms (not a sub-component README)\n` +
+  `  [ ] **Recent focus:** line lists concrete topics from the last 15 message pairs\n` +
   `  [ ] Current state reads as the actual recent work, not random sentences\n` +
-  `  [ ] Key decisions are real decisions, not section headers\n` +
-  `  [ ] Code artifacts are one-liners (no 200-line code embeds)\n` +
+  `  [ ] Key decisions are real decisions, no "A firm that..." fragments\n` +
+  `  [ ] Code artifacts: named entries + single "Plus N inline code blocks" summary\n` +
+  `  [ ] Next steps section has real action items (e.g. **PART 1:** ... **PART 2:** ...)\n` +
   `  [ ] No mojibake (no stray "â" or "Â" chars)\n`
 );

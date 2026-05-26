@@ -3,6 +3,7 @@ import {
   displayFilename,
   languageHintFromFilename,
 } from '../utils/attachments';
+import { stripUrls } from '../utils/text';
 
 export interface ArtifactSummary {
   displayName: string;
@@ -131,16 +132,46 @@ function guessNameForInlineCode(
     }
   }
 
-  const head = block.text.split('\n').slice(0, 5).join('\n');
-  const declMatch =
-    head.match(/^class\s+([A-Za-z_][\w]*)/m) ??
-    head.match(/^def\s+([A-Za-z_][\w]*)/m) ??
-    head.match(/^function\s+([A-Za-z_][\w]*)/m) ??
-    head.match(/^export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const)\s+([A-Za-z_][\w]*)/m);
-  if (declMatch) return `${declMatch[1]}()`;
+  const decl = topDeclaration(block.text);
+  if (decl) {
+    const symbolMatch = decl.match(/`([^`]+)`/);
+    if (symbolMatch) return `${symbolMatch[1]}()`;
+  }
 
   const lang = block.language ?? 'code';
   return `inline ${lang} #${mIdx}`;
+}
+
+const ANONYMOUS_INLINE_RE = /^inline\s+\S+\s+#\d+$/;
+
+export function isAnonymousInlineArtifact(a: ArtifactSummary): boolean {
+  if (a.source !== 'inline-code') return false;
+  return ANONYMOUS_INLINE_RE.test(a.displayName);
+}
+
+export function partitionArtifacts(
+  artifacts: ArtifactSummary[]
+): { named: ArtifactSummary[]; anonymous: ArtifactSummary[] } {
+  const named: ArtifactSummary[] = [];
+  const anonymous: ArtifactSummary[] = [];
+  for (const a of artifacts) {
+    if (isAnonymousInlineArtifact(a)) anonymous.push(a);
+    else named.push(a);
+  }
+  return { named, anonymous };
+}
+
+export function summarizeAnonymousArtifacts(anonymous: ArtifactSummary[]): string {
+  if (anonymous.length === 0) return '';
+  const counts = new Map<string, number>();
+  for (const a of anonymous) {
+    const lang = a.language || 'code';
+    counts.set(lang, (counts.get(lang) ?? 0) + 1);
+  }
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([lang, n]) => `${capitalizeLanguage(lang)} ×${n}`);
+  return `Plus ${anonymous.length} inline code block${anonymous.length === 1 ? '' : 's'} (${parts.join(', ')})`;
 }
 
 function buildSummary(
@@ -168,8 +199,8 @@ function buildSummary(
 
 function describeArtifact(name: string, content: string, language: string, loc: number): string {
   const fromHeader = extractLeadingComment(content, language);
-  if (fromHeader) {
-    return truncateDescription(fromHeader);
+  if (fromHeader && isProseLike(fromHeader)) {
+    return truncateDescription(stripUrls(fromHeader));
   }
 
   const role = roleHintFromFilename(name);
@@ -243,6 +274,15 @@ function firstSentence(text: string): string {
   const match = cleaned.match(/^[^.!?\n]{8,180}[.!?]?/);
   if (match) return match[0].trim();
   return cleaned.slice(0, 120).trim();
+}
+
+function isProseLike(s: string): boolean {
+  const trimmed = s.trim();
+  if (!trimmed) return false;
+  if (/^(@|#include\b|<\?|<!|<[A-Za-z]|import\s|from\s|require\(|\{|\[|use\s+strict)/.test(trimmed)) return false;
+  const letters = trimmed.match(/[A-Za-z]/g)?.length ?? 0;
+  if (letters / trimmed.length < 0.5) return false;
+  return true;
 }
 
 function roleHintFromFilename(name: string): string {

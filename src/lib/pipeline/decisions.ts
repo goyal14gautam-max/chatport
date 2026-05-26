@@ -2,10 +2,21 @@ import type { Message, NormalizedConversation } from '../types';
 import { looksLikeSectionHeader, stripMarkdown, stripUrls } from '../utils/text';
 import type { IdentityTerm } from './identity';
 
-const HARD_DECISION_RE = /\b(decided to|we decided|i decided|chose|chosen|going with|settling on|settled on|switched to|switching to|moved to|moving to|reverted to|adopted|keep (it|things|this) (the way|as is)|leaving (it|this|that) (as is|alone))\b/i;
-const SOFT_COMMIT_RE = /\b(let'?s (use|go with|drop|skip|stick with|try|build|do|focus on|keep|remove)|we'?ll (use|go|drop|skip|stick|build|do|keep)|i'?ll (use|go with|drop|build|do|keep)|is fine for now|manual is fine|good enough for now|(two|three|four) (roles|options|tiers|levels) only|stick with .{1,30})\b/i;
-const TRADEOFF_RE = /\b(chose .{1,40} over|picking .{1,40} over|going with .{1,40} instead|opted for .{1,40} over|instead of .{1,40})\b/i;
-const RECOMMEND_RE = /\b(i('?d| would)? recommend|recommend (using|going|dropping|building)|my recommendation|the right call|the right model|the correct choice)\b/i;
+const SUBJECT = `(?:I|we|let'?s|i'?ll|we'?ll|i'?m|we'?re|i'?ve|we'?ve)`;
+const NEGATION = `(?!\\s+(?:not|n't|never|don'?t|do\\s+not|will\\s+not|won'?t))`;
+const HARD_DECISION_RE = new RegExp(
+  `\\b${SUBJECT}\\s+(?:going\\s+to\\s+|gonna\\s+|just\\s+|already\\s+|now\\s+|finally\\s+)?(chose|chosen|choose|decided|deciding|decide|going\\s+with|gone\\s+with|settling\\s+on|settled\\s+on|switched\\s+to|switching\\s+to|moved\\s+to|moving\\s+to|reverted\\s+to|adopted|adopting|keeping|kept|dropping|dropped|skipping|skipped|removing|removed|sticking\\s+with|opted\\s+for|opting\\s+for|focused\\s+on|focusing\\s+on)${NEGATION}\\b`,
+  'i'
+);
+const SOFT_COMMIT_RE = new RegExp(
+  `\\b(?:${SUBJECT}\\s+(use|go\\s+with|drop|skip|stick\\s+with|try|build|do|focus\\s+on|keep|remove|switch|move|adopt|implement|ship|finalize)${NEGATION}|(?:${SUBJECT}\\s+(?:are\\s+|going\\s+to\\s+)?)?keep(?:ing)?\\s+(?:it|things|this)\\s+(?:the\\s+way|as\\s+is)|is\\s+fine\\s+for\\s+now|manual\\s+is\\s+fine|good\\s+enough\\s+for\\s+now|(?:two|three|four)\\s+(?:roles|options|tiers|levels)\\s+only)\\b`,
+  'i'
+);
+const TRADEOFF_RE = new RegExp(
+  `\\b${SUBJECT}\\s+(?:chose|picked|opted\\s+for|went\\s+with|going\\s+with)\\s+\\S.{1,60}?\\s+(?:over|instead\\s+of|rather\\s+than)\\b`,
+  'i'
+);
+const RECOMMEND_RE = /\b(i('?d| would)? recommend|recommend (using|going|dropping|building|skipping|keeping)|my recommendation\b|my suggestion is)\b/i;
 
 export interface Decision {
   text: string;
@@ -59,7 +70,22 @@ function isValidDecisionShape(s: string): boolean {
   if (/\?$/.test(s)) return false;
   if (looksLikeSectionHeader(s)) return false;
   if (!/[a-zA-Z]/.test(s)) return false;
+  const wordCount = s.split(/\s+/).filter(Boolean).length;
+  if (wordCount < 6) return false;
+  if (looksLikeDescriptiveFragment(s)) return false;
+  if (looksLikeFutureHypothetical(s)) return false;
   return true;
+}
+
+function looksLikeDescriptiveFragment(s: string): boolean {
+  if (!/^(A|An|The)\s+[a-z]/.test(s)) return false;
+  const head = s.slice(0, 80);
+  return !/\b(I|we|let'?s|i'?ll|we'?ll|i'?m|we'?re)\b/i.test(head);
+}
+
+function looksLikeFutureHypothetical(s: string): boolean {
+  if (!/^(After|Once|When|If)\b/i.test(s)) return false;
+  return /\b(will|would|could|might|shall)\b/i.test(s);
 }
 
 function scoreDecision(s: string, role: Message['role']): number {

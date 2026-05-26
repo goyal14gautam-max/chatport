@@ -5,11 +5,15 @@ import { extractDecisions } from '../pipeline/decisions';
 import {
   extractNextSteps,
   extractOpenQuestions,
+  extractStructuredPlan,
   recentMessageSnippets,
   type MessageSnippet,
+  type PlanItem,
 } from '../pipeline/recency';
 import {
   decideArtifactInlining,
+  partitionArtifacts,
+  summarizeAnonymousArtifacts,
   summarizeArtifacts,
   type ArtifactSummary,
 } from '../pipeline/artifacts';
@@ -24,7 +28,8 @@ export function renderCoding(ctx: RenderContext, stats: { input: number; output:
 
   const decisions = extractDecisions(ctx.conv, identity.terms);
   const snippets = recentMessageSnippets(ctx.conv, 15, CURRENT_STATE_BUDGET, identityTermsLower);
-  const nextSteps = extractNextSteps(ctx.conv);
+  const structuredPlan = extractStructuredPlan(ctx.conv);
+  const nextSteps = structuredPlan.length > 0 ? [] : extractNextSteps(ctx.conv);
   const openQuestions = extractOpenQuestions(ctx.conv);
   const artifacts = summarizeArtifacts(ctx.conv);
   const artifactDecision = decideArtifactInlining(artifacts);
@@ -34,9 +39,8 @@ export function renderCoding(ctx: RenderContext, stats: { input: number; output:
   sections.push(buildTitle(ctx, identity));
   sections.push(buildMetaLine(ctx, stats));
 
-  if (identity.aboutLine && identity.confidence === 'high') {
-    sections.push(`**About:** ${identity.aboutLine}`);
-  }
+  const aboutHeader = buildAboutHeader(identity);
+  if (aboutHeader) sections.push(aboutHeader);
 
   const currentState = buildCurrentState(snippets);
   if (currentState) sections.push(currentState);
@@ -47,13 +51,24 @@ export function renderCoding(ctx: RenderContext, stats: { input: number; output:
     sections.push(buildArtifactsSection(artifactDecision.artifacts, artifactDecision.inlineAll));
   }
 
-  sections.push(buildOpenAndNextSection(openQuestions, nextSteps));
+  sections.push(buildOpenAndNextSection(openQuestions, nextSteps, structuredPlan));
 
   sections.push(buildConversationMetadata(ctx, stats));
 
   sections.push(buildFooter());
 
   return sections.filter(Boolean).join('\n\n') + '\n';
+}
+
+function buildAboutHeader(identity: ProjectIdentity): string {
+  const lines: string[] = [];
+  if (identity.projectLine && identity.confidence !== 'low') {
+    lines.push(`**Project:** ${identity.projectLine}`);
+  }
+  if (identity.recentFocusLine && identity.recentMessageBlockCount >= 30) {
+    lines.push(`**Recent focus:** ${identity.recentFocusLine}`);
+  }
+  return lines.join('\n');
 }
 
 function buildTitle(ctx: RenderContext, identity: ProjectIdentity): string {
@@ -100,7 +115,6 @@ function trimDecision(s: string): string {
 function buildArtifactsSection(artifacts: ArtifactSummary[], inlineAll: boolean): string {
   if (artifacts.length === 0) return '';
   const lines: string[] = ['## Code artifacts in this conversation'];
-  let totalChars = 0;
 
   if (inlineAll) {
     for (const a of artifacts) {
@@ -115,24 +129,36 @@ function buildArtifactsSection(artifacts: ArtifactSummary[], inlineAll: boolean)
     return lines.join('\n');
   }
 
-  for (const a of artifacts) {
+  const { named, anonymous } = partitionArtifacts(artifacts);
+  let totalChars = 0;
+  let renderedCount = 0;
+  for (const a of named) {
     const line = `- \`${a.displayName}\` - ${a.description}`;
     if (totalChars + line.length > ARTIFACTS_SECTION_BUDGET) {
-      lines.push(`- *(${artifacts.length - (lines.length - 1)} more not listed)*`);
+      const remaining = named.length - renderedCount;
+      lines.push(`- *(${remaining} more named artifact${remaining === 1 ? '' : 's'} not listed)*`);
       break;
     }
     lines.push(line);
     totalChars += line.length;
+    renderedCount++;
   }
+
+  if (anonymous.length > 0) {
+    lines.push(`- ${summarizeAnonymousArtifacts(anonymous)}`);
+  }
+
   return lines.join('\n');
 }
 
 function buildOpenAndNextSection(
   openQuestions: { text: string }[],
-  nextSteps: { text: string }[]
+  nextSteps: { text: string }[],
+  structuredPlan: PlanItem[]
 ): string {
   const lines: string[] = ['## Open questions / Next steps'];
-  if (openQuestions.length === 0 && nextSteps.length === 0) {
+  const hasAnyContent = openQuestions.length > 0 || nextSteps.length > 0 || structuredPlan.length > 0;
+  if (!hasAnyContent) {
     lines.push('');
     lines.push('*Not explicitly stated in recent messages.*');
     return lines.join('\n');
@@ -142,7 +168,17 @@ function buildOpenAndNextSection(
     lines.push('**Open questions:**');
     for (const q of openQuestions) lines.push(`- ${q.text}`);
   }
-  if (nextSteps.length > 0) {
+  if (structuredPlan.length > 0) {
+    lines.push('');
+    lines.push('**Next steps:**');
+    for (const item of structuredPlan) {
+      if (item.label) {
+        lines.push(`- **${item.label}:** ${item.text}`);
+      } else {
+        lines.push(`- ${item.text}`);
+      }
+    }
+  } else if (nextSteps.length > 0) {
     lines.push('');
     lines.push('**Next steps:**');
     for (const n of nextSteps) lines.push(`- ${n.text}`);
