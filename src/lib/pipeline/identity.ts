@@ -1,4 +1,4 @@
-import type { Message, NormalizedConversation } from '../types';
+import type { NormalizedConversation } from '../types';
 import { stripMarkdown, stripUrls } from '../utils/text';
 
 export interface IdentityTerm {
@@ -266,7 +266,7 @@ function aboutFromInlineReadme(conv: NormalizedConversation): string | null {
 
 function firstNarrativeParagraph(content: string): string | null {
   const lines = content.split('\n');
-  let paragraph: string[] = [];
+  const paragraph: string[] = [];
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) {

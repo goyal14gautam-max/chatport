@@ -13,10 +13,7 @@ import {
   summarizeArtifacts,
   type ArtifactSummary,
 } from '../pipeline/artifacts';
-import {
-  displayFilename,
-  hasUsableFilename,
-} from '../utils/attachments';
+import { hasUsableFilename } from '../utils/attachments';
 
 const CURRENT_STATE_BUDGET = 3500;
 const ARTIFACTS_SECTION_BUDGET = 1500;

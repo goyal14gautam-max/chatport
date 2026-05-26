@@ -1,4 +1,4 @@
-import type { ContentBlock, Message, NormalizedConversation } from '../types';
+import type { Message, NormalizedConversation } from '../types';
 import { looksLikeSectionHeader, splitSentences, stripMarkdown, stripUrls } from '../utils/text';
 
 export interface MessageSnippet {

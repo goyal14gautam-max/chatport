@@ -1,4 +1,4 @@
-import type { Attachment, ContentBlock, Message, NormalizedConversation } from '../types';
+import type { ContentBlock, Message, NormalizedConversation } from '../types';
 import {
   displayFilename,
   languageHintFromFilename,
