@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse } from '../src/lib/parsers';
 import { classifyConversation } from '../src/lib/pipeline/classify';
@@ -56,18 +56,49 @@ describe('compress – resume level', () => {
     expect(meta.outputChars).toBe(markdown.length);
   });
 
-  it('includes the latest artifact inline for the artifacts fixture', () => {
+
+  it('detects coding type and renders project-narrative sections', () => {
+    const conv = parse(loadFixture('chatgpt-coding.json'));
+    const { markdown, meta } = compress(conv, { level: 'resume' });
+    expect(meta.type).toBe('coding');
+    expect(markdown).toMatch(/##\s+Current state/);
+    expect(markdown).toMatch(/##\s+Key decisions made/);
+    expect(markdown).toMatch(/##\s+Open questions \/ Next steps/);
+    expect(markdown).toMatch(/##\s+Conversation metadata/);
+  });
+
+  it('renders no header fragments or stray markdown emphasis in bullets', () => {
+    const conv = parse(loadFixture('chatgpt-coding.json'));
+    const { markdown } = compress(conv, { level: 'resume' });
+    expect(markdown).not.toMatch(/^- #/m);
+    expect(markdown).not.toMatch(/^- \*\*[A-Z][^*]+\*\*$/m);
+    expect(markdown).not.toMatch(/^-\s+\*[A-Z]/m);
+  });
+
+  it('inlines a small Claude artifact verbatim (1 artifact, <2KB)', () => {
     const conv = parse(loadFixture('claude-artifacts.json'));
     const { markdown } = compress(conv, { level: 'resume' });
+    expect(markdown).toContain('## Code artifacts in this conversation');
     expect(markdown).toContain('import { readFileSync');
     expect(markdown).not.toContain('const fs = require(');
   });
 
-  it('detects coding type and renders coding sections', () => {
+  it('caps any inlined code block at a sane line count', () => {
     const conv = parse(loadFixture('chatgpt-coding.json'));
-    const { markdown, meta } = compress(conv, { level: 'resume' });
-    expect(meta.type).toBe('coding');
-    expect(markdown).toMatch(/##\s+(Goal|Latest state|Next steps)/);
+    const { markdown } = compress(conv, { level: 'resume' });
+    const fenceRe = /```[\s\S]*?```/g;
+    let match: RegExpExecArray | null;
+    while ((match = fenceRe.exec(markdown)) !== null) {
+      const lineCount = match[0].split('\n').length;
+      expect(lineCount).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it('emits a conversation metadata footer with message count and source', () => {
+    const conv = parse(loadFixture('chatgpt-coding.json'));
+    const { markdown } = compress(conv, { level: 'resume' });
+    expect(markdown).toMatch(/\d+ messages/);
+    expect(markdown).toMatch(/Source:\s+(ChatGPT|Claude)/);
   });
 });
 
@@ -104,5 +135,81 @@ describe('compress – meta', () => {
     expect(meta.inputChars).toBeGreaterThan(0);
     expect(meta.outputChars).toBeGreaterThan(0);
     expect(typeof meta.droppedMessages).toBe('number');
+  });
+});
+
+const prajnaPath = resolve(__dirname, 'fixtures', 'prajna.json');
+const prajnaDescribe = existsSync(prajnaPath) ? describe : describe.skip;
+
+function loadPrajna() {
+  return parse(JSON.parse(readFileSync(prajnaPath, 'utf8')));
+}
+
+prajnaDescribe('compress – Prajna project narrative (long conversation)', () => {
+  it('writes a preview file for human review at out/prajna-resume-new.md', () => {
+    const { markdown, meta } = compress(loadPrajna(), { level: 'resume' });
+    mkdirSync(resolve(__dirname, '..', 'out'), { recursive: true });
+    writeFileSync(resolve(__dirname, '..', 'out', 'prajna-resume-new.md'), markdown, 'utf8');
+    expect(meta.outputChars).toBeGreaterThan(500);
+  });
+
+  it('classifies as coding or mixed', () => {
+    const r = classifyConversation(loadPrajna());
+    expect(['coding', 'mixed']).toContain(r.type);
+  });
+
+  it('puts Prajna in the title', () => {
+    const { markdown } = compress(loadPrajna(), { level: 'resume' });
+    const firstH1 = markdown.split('\n').find((l) => l.startsWith('# '));
+    expect(firstH1).toMatch(/Prajna/i);
+  });
+
+  it('emits all required project-narrative sections', () => {
+    const { markdown } = compress(loadPrajna(), { level: 'resume' });
+    expect(markdown).toMatch(/##\s+Current state/);
+    expect(markdown).toMatch(/##\s+Key decisions made/);
+    expect(markdown).toMatch(/##\s+Open questions \/ Next steps/);
+    expect(markdown).toMatch(/##\s+Conversation metadata/);
+  });
+
+  it('does not include markdown header fragments inside bullets', () => {
+    const { markdown } = compress(loadPrajna(), { level: 'resume' });
+    expect(markdown).not.toMatch(/^- #/m);
+    expect(markdown).not.toMatch(/^- \*\*?[A-Z][^*\n]{0,50}\*\*?$/m);
+  });
+
+  it('does not contain code blocks longer than 100 lines', () => {
+    const { markdown } = compress(loadPrajna(), { level: 'resume' });
+    const fenceRe = /```[\s\S]*?```/g;
+    let match: RegExpExecArray | null;
+    while ((match = fenceRe.exec(markdown)) !== null) {
+      const lineCount = match[0].split('\n').length;
+      expect(lineCount).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('does not put a raw URL as the About/Goal line', () => {
+    const { markdown } = compress(loadPrajna(), { level: 'resume' });
+    const aboutLine = markdown.split('\n').find((l) => l.startsWith('**About:**'));
+    if (aboutLine) {
+      expect(aboutLine).not.toMatch(/https?:\/\//);
+    }
+  });
+
+  it('emits Code artifacts as one-liners, not 200-line code blocks', () => {
+    const { markdown } = compress(loadPrajna(), { level: 'resume' });
+    const artifactsIdx = markdown.indexOf('## Code artifacts');
+    if (artifactsIdx === -1) return;
+    const section = markdown.slice(artifactsIdx);
+    const bulletLines = section.split('\n').filter((l) => l.startsWith('- `'));
+    expect(bulletLines.length).toBeGreaterThan(0);
+    for (const line of bulletLines) {
+      expect(line.length).toBeLessThan(200);
+    }
+  });
+
+  it('fits within the resume budget with reasonable tolerance', () => {
+    const { markdown } = compress(loadPrajna(), { level: 'resume' });
+    expect(markdown.length).toBeLessThan(BUDGET_CHARS.resume * 1.5);
   });
 });

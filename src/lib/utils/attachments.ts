@@ -71,7 +71,17 @@ export function shouldInlineCodeFile(att: Attachment): boolean {
 export function renderAttachmentPlaceholder(att: Attachment): string {
   const sizeStr = att.size ? `, ${formatBytes(att.size)}` : '';
   const label = describe(att.type);
-  return `[Attachment: ${att.filename} — ${label}${sizeStr}]`;
+  const name = displayFilename(att.filename) || `<unnamed ${label}>`;
+  return `[Attachment: ${name} - ${label}${sizeStr}]`;
+}
+
+export function displayFilename(filename: string | undefined | null): string {
+  if (!filename) return '';
+  return filename.trim().replace(/^\d{10,16}_/, '');
+}
+
+export function hasUsableFilename(att: Attachment): boolean {
+  return !!att.filename && att.filename.trim().length > 0;
 }
 
 export function renderInlineCodeFile(att: Attachment): string {
@@ -82,7 +92,8 @@ export function renderInlineCodeFile(att: Attachment): string {
     CODE_TRUNCATE_LINES
   );
   const tail = truncated ? `\n// ... [truncated, ${originalLines - CODE_TRUNCATE_LINES} more lines]` : '';
-  return `**Attached file: \`${att.filename}\`**\n\n\`\`\`${lang}\n${text}${tail}\n\`\`\``;
+  const name = displayFilename(att.filename) || '<unnamed file>';
+  return `**Attached file: \`${name}\`**\n\n\`\`\`${lang}\n${text}${tail}\n\`\`\``;
 }
 
 export function languageHintFromFilename(filename: string): string {

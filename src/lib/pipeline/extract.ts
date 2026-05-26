@@ -4,7 +4,7 @@ import type {
   Message,
   NormalizedConversation,
 } from '../types';
-import { hash, splitSentences } from '../utils/text';
+import { hash, splitSentences, stripMarkdown } from '../utils/text';
 
 const DECISION_RE = /\b(let's|we'?ll|going to use|decided to|going with|chose|chosen|will use|plan to|i'?ll go with)\b/i;
 const QUESTION_END_RE = /\?\s*$/;
@@ -33,9 +33,12 @@ function candidatesFromBlock(
   position: number
 ): Candidate[] {
   if (block.type === 'text') {
-    return splitSentences(block.text).map((sentence, sIdx) =>
-      makeSentenceCandidate(sentence, message, mIdx, bIdx, sIdx, position)
-    );
+    return splitSentences(block.text)
+      .map((s) => stripMarkdown(s))
+      .filter((s) => s.length > 0)
+      .map((sentence, sIdx) =>
+        makeSentenceCandidate(sentence, message, mIdx, bIdx, sIdx, position)
+      );
   }
   if (block.type === 'code') {
     return [

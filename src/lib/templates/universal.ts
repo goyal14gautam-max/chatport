@@ -26,7 +26,7 @@ export interface RenderContext {
 export function buildHeader(ctx: RenderContext, stats: { input: number; output: number }): string {
   const title = ctx.conv.title?.trim() || 'Conversation Handoff';
   const verb = stats.output <= stats.input ? 'Compressed' : 'Restructured';
-  const meta = `**Source:** ${ctx.conv.source} · **Type:** ${ctx.type} · **${verb} ${stats.input.toLocaleString()} → ${stats.output.toLocaleString()} chars**`;
+  const meta = `**Source:** ${ctx.conv.source} | **Type:** ${ctx.type} | **${verb} ${stats.input.toLocaleString()} -> ${stats.output.toLocaleString()} chars**`;
   return `# ${title}\n\n${meta}`;
 }
 

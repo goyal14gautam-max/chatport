@@ -37,3 +37,6 @@ next-env.d.ts
 
 # playwright mcp screenshots and snapshots
 /.playwright-mcp/
+
+# Real-conversation fixtures (synthetic data only in public repo)
+/tests/fixtures/prajna*

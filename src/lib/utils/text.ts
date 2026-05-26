@@ -113,3 +113,61 @@ export function hash(s: string): string {
   }
   return (h >>> 0).toString(36);
 }
+
+export function asciiize(s: string): string {
+  if (!s) return '';
+  return s
+    .replace(/[—–―]/g, '-')
+    .replace(/…/g, '...')
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/→/g, '->')
+    .replace(/←/g, '<-')
+    .replace(/·/g, '|')
+    .replace(/•/g, '-')
+    .replace(/[─-╿]/g, '-');
+}
+
+export function stripMarkdown(s: string): string {
+  if (!s) return '';
+  let out = s
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^>\s+/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+[.)]\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/(\s|^)\*+/g, '$1')
+    .replace(/\*+(?=\s|$)/g, '')
+    .replace(/(\s|^)_+/g, '$1')
+    .replace(/_+(?=\s|$)/g, '');
+  out = asciiize(out);
+  out = out.replace(/[ \t]+/g, ' ').trim();
+  return out;
+}
+
+export function looksLikeSectionHeader(s: string): boolean {
+  const t = s.trim();
+  if (!t) return false;
+  if (t.length > 80) return false;
+  const lastChar = t[t.length - 1];
+  if (lastChar === '.' || lastChar === '!' || lastChar === '?') return false;
+  const first = t[0];
+  if (first !== first.toUpperCase()) return false;
+  return true;
+}
+
+export function stripUrls(s: string): string {
+  return s.replace(/https?:\/\/\S+/g, ' ').replace(/[ \t]+/g, ' ');
+}
+
+export function urlRatio(s: string): number {
+  if (!s) return 0;
+  const urls = s.match(/https?:\/\/\S+/g) ?? [];
+  const urlChars = urls.reduce((a, u) => a + u.length, 0);
+  return urlChars / s.length;
+}
