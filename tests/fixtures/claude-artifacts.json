@@ -1,0 +1,95 @@
+{
+  "uuid": "conv-claude-artifacts-1",
+  "name": "Build a markdown export script",
+  "created_at": "2026-05-20T10:00:00Z",
+  "updated_at": "2026-05-20T11:00:00Z",
+  "model": "claude-opus-4-7",
+  "chat_messages": [
+    {
+      "uuid": "msg-1",
+      "sender": "human",
+      "created_at": "2026-05-20T10:00:00Z",
+      "content": [
+        { "type": "text", "text": "I need a Node script that walks a directory and exports all markdown files concatenated into one. Can you write that?" }
+      ]
+    },
+    {
+      "uuid": "msg-2",
+      "sender": "assistant",
+      "created_at": "2026-05-20T10:01:00Z",
+      "content": [
+        { "type": "text", "text": "Here's a first pass:" },
+        {
+          "type": "tool_use",
+          "name": "artifacts",
+          "input": {
+            "id": "md-export",
+            "title": "markdown-export.js",
+            "language": "javascript",
+            "content": "const fs = require('fs');\nconst path = require('path');\n\nfunction walk(dir) {\n  const out = [];\n  for (const f of fs.readdirSync(dir)) {\n    const full = path.join(dir, f);\n    if (fs.statSync(full).isDirectory()) out.push(...walk(full));\n    else if (full.endsWith('.md')) out.push(full);\n  }\n  return out;\n}\n\nconst files = walk(process.argv[2] || '.');\nconst out = files.map(f => fs.readFileSync(f, 'utf8')).join('\\n\\n---\\n\\n');\nconsole.log(out);"
+          }
+        }
+      ]
+    },
+    {
+      "uuid": "msg-3",
+      "sender": "human",
+      "created_at": "2026-05-20T10:10:00Z",
+      "content": [
+        { "type": "text", "text": "Can you add file headers showing the relative path, and skip node_modules?" }
+      ]
+    },
+    {
+      "uuid": "msg-4",
+      "sender": "assistant",
+      "created_at": "2026-05-20T10:11:00Z",
+      "content": [
+        { "type": "text", "text": "Updated:" },
+        {
+          "type": "tool_use",
+          "name": "artifacts",
+          "input": {
+            "id": "md-export",
+            "title": "markdown-export.js",
+            "language": "javascript",
+            "content": "const fs = require('fs');\nconst path = require('path');\n\nconst SKIP = new Set(['node_modules', '.git', '.next']);\n\nfunction walk(dir, root = dir) {\n  const out = [];\n  for (const f of fs.readdirSync(dir)) {\n    if (SKIP.has(f)) continue;\n    const full = path.join(dir, f);\n    if (fs.statSync(full).isDirectory()) out.push(...walk(full, root));\n    else if (full.endsWith('.md')) out.push({ path: path.relative(root, full), full });\n  }\n  return out;\n}\n\nconst root = process.argv[2] || '.';\nconst files = walk(root);\nconst out = files.map(({ path: p, full }) =>\n  `## ${p}\\n\\n${fs.readFileSync(full, 'utf8')}`\n).join('\\n\\n---\\n\\n');\nconsole.log(out);"
+          }
+        }
+      ]
+    },
+    {
+      "uuid": "msg-5",
+      "sender": "human",
+      "created_at": "2026-05-20T10:30:00Z",
+      "content": [
+        { "type": "text", "text": "Convert it to TypeScript with proper types and ESM imports?" }
+      ]
+    },
+    {
+      "uuid": "msg-6",
+      "sender": "assistant",
+      "created_at": "2026-05-20T10:31:00Z",
+      "content": [
+        { "type": "text", "text": "Done. Let's go with this:" },
+        {
+          "type": "tool_use",
+          "name": "artifacts",
+          "input": {
+            "id": "md-export",
+            "title": "markdown-export.ts",
+            "language": "typescript",
+            "content": "import { readFileSync, readdirSync, statSync } from 'node:fs';\nimport { join, relative } from 'node:path';\n\nconst SKIP = new Set(['node_modules', '.git', '.next']);\n\ninterface MdFile {\n  path: string;\n  full: string;\n}\n\nfunction walk(dir: string, root: string = dir): MdFile[] {\n  const out: MdFile[] = [];\n  for (const f of readdirSync(dir)) {\n    if (SKIP.has(f)) continue;\n    const full = join(dir, f);\n    if (statSync(full).isDirectory()) out.push(...walk(full, root));\n    else if (full.endsWith('.md')) out.push({ path: relative(root, full), full });\n  }\n  return out;\n}\n\nconst root = process.argv[2] ?? '.';\nconst files = walk(root);\nconst out = files\n  .map(({ path, full }) => `## ${path}\\n\\n${readFileSync(full, 'utf8')}`)\n  .join('\\n\\n---\\n\\n');\nconsole.log(out);"
+          }
+        }
+      ]
+    },
+    {
+      "uuid": "msg-7",
+      "sender": "human",
+      "created_at": "2026-05-20T11:00:00Z",
+      "content": [
+        { "type": "text", "text": "How do I handle a directory that has thousands of markdown files without blowing memory?" }
+      ]
+    }
+  ]
+}

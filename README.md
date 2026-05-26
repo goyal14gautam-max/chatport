@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ChatPort
 
-## Getting Started
+Compress ChatGPT and Claude conversations into compact, portable markdown handoff documents. Paste them into any other AI tool to continue your work with full context — without re-explaining everything.
 
-First, run the development server:
+Built entirely with classical NLP (TF-IDF, TextRank, regex). **No LLM API calls.** No accounts. No data stored.
+
+## The problem
+
+You hit a usage limit mid-conversation. You want to continue on a different model, in a different tool, or just on a fresh chat. Existing tools dump the entire conversation as markdown — 200 messages of noise that the next AI has to re-parse. ChatPort instead produces a structured handoff doc: goal, key decisions, latest state, open questions, next steps.
+
+## How it works
+
+Two input paths, one pipeline:
+
+- **Paste link** — paste a ChatGPT share URL, the server fetches the share page, decodes the React Router stream, and runs the same processing pipeline as the upload path. Claude share pages render the conversation client-side, so they can't be auto-fetched server-side — for Claude, use Upload JSON.
+- **Upload JSON** — drop the `conversations.json` from ChatGPT's data export or Claude's data export. Everything runs in your browser; nothing leaves the page.
+
+The compression pipeline:
+
+1. **Normalize** — both ChatGPT and Claude exports are parsed into one common schema (messages, content blocks, attachments).
+2. **Classify** — heuristic detection of conversation type: coding, writing, research, planning, or mixed.
+3. **Extract candidates** — every sentence, code block, and artifact becomes a scoring candidate.
+4. **Score** — TF-IDF for informational density, plus position recency, role weights, question/decision markers, and a type-specific overlay.
+5. **Select** — always-keep rules (last user message, artifacts, system prompt) plus a greedy knapsack to fit the budget.
+6. **Render** — type-aware markdown template with sections like Goal, Key decisions, Latest state, Open questions, Next steps.
+
+Output is offered at two compression levels in the UI:
+
+- **Resume** — ~9k chars. The headline use case: fits in a fresh AI prompt, contains the substance.
+- **Full** — verbatim conversation with attachments stripped to placeholders, for when you want everything.
+
+## Privacy
+
+- **JSON upload path:** runs entirely in your browser. The conversation never touches a server.
+- **Link path:** the server fetches the public ChatGPT share page (the only way to bypass CORS). The fetch is not logged or stored beyond ephemeral function logs.
+- No analytics. No accounts. No persistence.
+
+## Tech stack
+
+- Next.js 14 (App Router) + TypeScript
+- Tailwind CSS
+- `react-dropzone`, `react-markdown`, `remark-gfm`
+- Inline TF-IDF and TextRank (~100 LOC total — `natural` was dropped after webpack tried to bundle MongoDB drivers)
+- Vitest for tests
+- Deployed on Vercel
+
+## Local development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repo-url>
+cd chatport
+npm install
+npm run dev          # http://localhost:3000
+npm test             # vitest, 66 tests
+npm run build        # production build
+npm run cli -- tests/fixtures/chatgpt-coding.json resume   # eyeball CLI
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Project structure
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+src/
+  lib/
+    types.ts                  # normalized schema
+    parsers/                  # ChatGPT + Claude export → normalized JSON
+    pipeline/                 # classify → extract → score → select → summarize → render
+    templates/                # type-specific markdown templates
+    utils/                    # text splitting, TF-IDF, TextRank, attachment classifier
+    scrapers/                 # ChatGPT share-page fetch + React Router stream decoder
+    browser/                  # client-side helpers (ingest, scrape, summarizeBoth)
+  app/
+    page.tsx                  # main UI (state machine)
+    api/scrape/route.ts       # POST endpoint for ChatGPT share URLs
+  components/                 # 9 presentational React components
+scripts/cli.ts                # CLI for eyeball-testing the pipeline
+tests/                        # vitest unit tests + fixtures
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Known limitations
 
-## Learn More
+- **Link path is ChatGPT-only.** Claude's share page is a pure SPA shell with no server-rendered conversation data. For Claude, use the JSON upload path.
+- **The ChatGPT scraper will eventually break** when ChatGPT updates its React Router stream format. When that happens, the UI shows a specific error and offers a one-click switch to JSON upload.
+- **Output quality is extractive, not abstractive.** The pipeline picks the most informative existing sentences; it does not rewrite or synthesize. For technical conversations where reasoning flows across paragraphs, expect to lose some nuance. This is the deliberate cost of staying LLM-free.
+- **Voice-transcription artifacts pass through.** If the original conversation contains transcription errors ("lems" instead of "LLMs"), so will the output.
+- **Cloudflare may rate-limit or block the server-side fetch** from Vercel egress IPs. If that happens, the UI falls back to the JSON upload path.
 
-To learn more about Next.js, take a look at the following resources:
+## Roadmap
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Browser extension (works on private chats, runs in your authenticated session, no scraping required)
+- Compression-level selector beyond the current Resume/Full toggle (TL;DR, Resume Work, Full Handoff)
+- Better sentence-splitter for markdown-heavy assistant messages
+- Optional opt-in LLM polish pass (bring-your-own-key) for abstractive summarization
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## License
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT.

@@ -1,0 +1,65 @@
+{
+  "uuid": "conv-claude-research-1",
+  "name": "Caffeine half-life research",
+  "created_at": "2026-04-15T14:00:00Z",
+  "updated_at": "2026-04-15T14:30:00Z",
+  "model": "claude-sonnet-4-6",
+  "chat_messages": [
+    {
+      "uuid": "msg-1",
+      "sender": "human",
+      "created_at": "2026-04-15T14:00:00Z",
+      "content": [
+        { "type": "text", "text": "What is the typical half-life of caffeine in adults, and what factors cause it to vary?" }
+      ]
+    },
+    {
+      "uuid": "msg-2",
+      "sender": "assistant",
+      "created_at": "2026-04-15T14:02:00Z",
+      "content": [
+        { "type": "text", "text": "The mean elimination half-life of caffeine in healthy adults is around 5 hours, though it ranges widely from 1.5 to 9.5 hours according to studies in the Annual Review of Nutrition. Several factors cause variation. Smoking roughly halves the half-life because nicotine induces the CYP1A2 enzyme responsible for caffeine metabolism, according to research published in Clinical Pharmacokinetics. Pregnancy extends it significantly, with the third trimester showing half-lives of 10-15 hours. Oral contraceptives can double the half-life. Genetic variation in the CYP1A2 gene produces fast and slow metabolizers, and this single polymorphism explains a large fraction of inter-individual variability per a study in the European Journal of Clinical Pharmacology." }
+      ]
+    },
+    {
+      "uuid": "msg-3",
+      "sender": "human",
+      "created_at": "2026-04-15T14:10:00Z",
+      "content": [
+        { "type": "text", "text": "Does caffeine affect sleep quality even when consumed many hours before bed?" }
+      ]
+    },
+    {
+      "uuid": "msg-4",
+      "sender": "assistant",
+      "created_at": "2026-04-15T14:12:00Z",
+      "content": [
+        { "type": "text", "text": "Yes. A controlled study published in the Journal of Clinical Sleep Medicine found that 400 mg of caffeine consumed 6 hours before bedtime reduced total sleep time by more than 1 hour compared to placebo. Sleep efficiency also dropped measurably. The authors concluded that even afternoon caffeine can impair sleep, and the effect is larger in slow metabolizers." }
+      ]
+    },
+    {
+      "uuid": "msg-5",
+      "sender": "human",
+      "created_at": "2026-04-15T14:20:00Z",
+      "content": [
+        { "type": "text", "text": "Is there a way to know whether I'm a fast or slow metabolizer without genetic testing?" }
+      ]
+    },
+    {
+      "uuid": "msg-6",
+      "sender": "assistant",
+      "created_at": "2026-04-15T14:22:00Z",
+      "content": [
+        { "type": "text", "text": "Self-report tools exist but are imprecise. Some clinicians use a caffeine challenge — track how long it takes for stimulant effects to subside after a measured dose — but this is a rough heuristic. Direct CYP1A2 genotyping is the only reliable method." }
+      ]
+    },
+    {
+      "uuid": "msg-7",
+      "sender": "human",
+      "created_at": "2026-04-15T14:30:00Z",
+      "content": [
+        { "type": "text", "text": "What's a reasonable daily cap to avoid cardiovascular risks?" }
+      ]
+    }
+  ]
+}

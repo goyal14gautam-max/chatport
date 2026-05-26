@@ -1,0 +1,44 @@
+[
+  {
+    "title": "Old conversation",
+    "create_time": 1600000000,
+    "update_time": 1600000100,
+    "conversation_id": "conv-old",
+    "current_node": "n1",
+    "mapping": {
+      "n0": { "id": "n0", "parent": null, "children": ["n1"], "message": null },
+      "n1": {
+        "id": "n1",
+        "parent": "n0",
+        "children": [],
+        "message": {
+          "id": "m1",
+          "author": { "role": "user" },
+          "create_time": 1600000100,
+          "content": { "content_type": "text", "parts": ["Old chat content."] }
+        }
+      }
+    }
+  },
+  {
+    "title": "Newer conversation",
+    "create_time": 1700000000,
+    "update_time": 1700000100,
+    "conversation_id": "conv-new",
+    "current_node": "n1",
+    "mapping": {
+      "n0": { "id": "n0", "parent": null, "children": ["n1"], "message": null },
+      "n1": {
+        "id": "n1",
+        "parent": "n0",
+        "children": [],
+        "message": {
+          "id": "m1",
+          "author": { "role": "user" },
+          "create_time": 1700000100,
+          "content": { "content_type": "text", "parts": ["Newer chat content."] }
+        }
+      }
+    }
+  }
+]
